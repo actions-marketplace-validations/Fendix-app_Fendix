@@ -4,7 +4,7 @@ pyyaml>=6.0.3
 openapi-spec-validator>=0.9.0
 detect-secrets>=1.5.0
 packaging>=26.2
-jsonschema>=4.25.1,<5
+jsonschema>=4.26.0,<5
 # Semgrep's MCP 1.16.x imports eval_type_backport, removed in Pydantic 2.14.
 # Keep that API available until the Semgrep/MCP dependency line is upgraded.
 pydantic<2.14
