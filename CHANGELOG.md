@@ -7,6 +7,86 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.6.3] - 2026-10-17
+
+A security-correctness patch:
+- one Flask finding gave remediation advice that, if followed, left a route
+  unauthenticated;
+- four bundled Semgrep rules could never match;
+- the public security catalog printed raw Semgrep metavariables.
+
+Report schema, SARIF structure, fingerprints, finding identity, exit codes and
+the Action's inputs and outputs are unchanged.
+
+> **Correction, 2026-10-17.** This entry first said the repaired JWT rule
+> blocks under `--fail-on HIGH`, and that scans can now block where v3.6.2
+> passed. Under the default confidence-gated `--fail-on`, neither is true: an
+> uncorroborated Semgrep finding remains WARN, as
+> [docs/semgrep-rules.md](docs/semgrep-rules.md) describes, so the
+> release-gate outcome is unchanged from v3.6.2. The two passages below are
+> corrected. The v3.6.3 tag message keeps the original wording.
+
+### Fixed
+
+- **`flask-route-no-auth-decorator` gave inverted advice.** Its finding said
+  an auth decorator belongs "directly above the @app.route(...) line". Flask's
+  `route()` must be the outermost decorator, so following that advice
+  registered the unwrapped view and left the route unauthenticated. The
+  finding's fix text, SARIF help and catalog remediation now say the decorator
+  goes directly below `@app.route(...)` and that one placed above it does not
+  protect the route. Only the text after "directly" changed, so every finding
+  keeps its title, fingerprint, grouping and baseline match.
+- **Four bundled Semgrep rules never matched.**
+  - `python-eval-injection`, `python-jwt-decode-no-verification`,
+    `python-sql-injection-string-format` and
+    `python-command-injection-shell-true` listed their alternative patterns
+    as sibling `pattern:` entries. Semgrep requires all of those to match at
+    once, so none of the four ever fired.
+  - Each now uses `pattern-either`:
+    - `eval()` / `exec()` with a non-literal argument;
+    - `jwt.decode()` with `verify_signature: False` or `"none"` among the
+      algorithms;
+    - an `execute()` query built with `%`, `+`, an f-string or `.format()`;
+    - `os.system()` / `os.popen()` with a non-literal command.
+  - `subprocess(..., shell=True)` stays with
+    `python-subprocess-shell-true-with-variable`, so it is reported once.
+  - The Python analyzer already detects most of these shapes. Where it and
+    these rules flag one location in the same category, the location is
+    still reported once.
+  - These rules add the first detection of
+    `jwt.decode(..., algorithms=["none"])`, which no analyzer caught.
+  - Where the Python analyzer does not run, they are the only detection for
+    every shape above, for example in a standalone binary without its
+    Python engine.
+  - **Known overlap.** When both analyzers run,
+    `jwt.decode(..., options={"verify_signature": False})` can produce two
+    findings for the same call:
+    - a Python-analyzer finding (`python.ast/PY_JWT_WEAK`, category
+      `auth_bypass`, HIGH);
+    - a Semgrep finding (`python-jwt-decode-no-verification`, category
+      `auth`, CRITICAL).
+
+    Both describe the same real insecure call. Each keeps its own evidence and
+    analyzer provenance, and the second finding does not mean the code ran
+    twice. Under the default confidence-gated `--fail-on`, both are WARN. The
+    Semgrep finding is CRITICAL severity, but without qualifying
+    corroboration a Semgrep-only finding stays in the MEDIUM confidence band
+    and does not block. This shape's release-gate outcome is unchanged from
+    v3.6.2. v3.6.3 does not change how findings from different analyzers are
+    correlated or which verdict takes precedence. Merging the two without
+    lowering the verdict is tracked in
+    [#127](https://github.com/Fendix-app/Fendix/issues/127).
+- **The public security catalog printed raw Semgrep metavariables.** Eleven
+  checks published titles and remediation such as "found in '$VAR'" or
+  "Flask route '$FUNC'". Rules whose message interpolates a metavariable now
+  carry static `fendix_title` and `fendix_remediation` metadata, which the
+  catalog publishes in their place. Runtime findings still name the matched
+  symbol.
+- **A Semgrep rule clause was silently ignored.** A `pattern-not` sat
+  outside `patterns:` in `python-hardcoded-secret-assignment`, so Semgrep
+  skipped it with a warning. It was redundant and is removed; detection is
+  unchanged.
+
 ### Changed
 
 - **The Fendix Action is the recommended GitHub integration.** The README,
@@ -23,6 +103,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the integration guide and `docs/ci-cd-integration.md` link the listing, and
   the public-claims check no longer treats "public Marketplace Action" as an
   obsolete claim.
+
+### Upgrading
+
+- **New findings.** Scans can now report findings that v3.6.2 did not.
+  These are findings v3.6.2 should have reported:
+  - `eval()` / `exec()` with a non-literal argument;
+  - SQL built by string formatting;
+  - `os.system()` / `os.popen()` with a non-literal command;
+  - JWT decoding with signature verification disabled or the `"none"`
+    algorithm.
+
+  The default `--code` scan, the official image and the Action run the Python
+  analyzer, which already reported most of these. There, two findings are new:
+  `algorithms=["none"]`, and the Semgrep `verify_signature: False` finding
+  described above. Without the Python analyzer, every one of these shapes is
+  new.
+
+  These findings carry their rule severity: CRITICAL, or HIGH for `eval()` /
+  `exec()`. Under the default confidence-gated `--fail-on`, an uncorroborated
+  Semgrep finding remains WARN, so the release-gate outcome is unchanged from
+  v3.6.2. With `--enforce-confidence=false`, the legacy severity-only gate,
+  they block at or above the threshold and are marked `policy_override`.
+- **Finding identity is unchanged.** No title, fingerprint, grouping key,
+  baseline entry or `.fendix-ignore` match changes. The
+  `flask-route-no-auth-decorator` Fix text and SARIF help change for new scans;
+  stored scans and existing Jira tickets keep the old text.
+- **The GitHub Action is unchanged,** and `@v1` still points to the v3.6.2
+  release commit. To install this release, set `version: v3.6.3`, or leave
+  `version` unset to install the latest release.
 
 ## [3.6.2] - 2026-10-16
 
