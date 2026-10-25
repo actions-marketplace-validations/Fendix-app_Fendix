@@ -379,6 +379,32 @@ func TestScan_EmitsFindingsFromFakeSemgrep(t *testing.T) {
 	}
 }
 
+// Semgrep's version check calls semgrep.dev before every run, and without a
+// network it waits instead of failing: 96 s on Semgrep 1.182.1, which put an
+// offline scan of a mid-size tree past defaultTimeout. Every run must turn it
+// off, whichever Semgrep is installed.
+func TestScan_DisablesSemgrepVersionCheck(t *testing.T) {
+	argv := filepath.Join(t.TempDir(), "argv")
+	installArgRecordingSemgrep(t, argv)
+	if _, err := Scan(context.Background(), t.TempDir()); err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+	raw, err := os.ReadFile(argv)
+	if err != nil {
+		t.Fatalf("semgrep did not run: %v", err)
+	}
+	args := strings.Split(strings.TrimRight(string(raw), "\n"), "\n")
+	found := false
+	for _, a := range args {
+		if a == "--disable-version-check" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("semgrep ran without --disable-version-check: %q", args)
+	}
+}
+
 func TestScan_EmptyResultsProducesNothing(t *testing.T) {
 	stdout := semgrepOutputJSON(t, nil)
 	installFakeSemgrep(t, string(stdout), "", 0)
@@ -392,12 +418,15 @@ func TestScan_EmptyResultsProducesNothing(t *testing.T) {
 	}
 }
 
-func TestScan_MalformedJSONReturnsZeroFindings(t *testing.T) {
+// Until v3.6.5 this was read as zero findings, so a semgrep that printed
+// anything but its JSON envelope was recorded ok. With --json a working
+// semgrep always writes the envelope; without it nothing is known.
+func TestScan_MalformedJSONIsMalformedOutput(t *testing.T) {
 	installFakeSemgrep(t, "not json", "", 0)
 	dir := t.TempDir()
 	got, err := Scan(context.Background(), dir)
-	if err != nil {
-		t.Errorf("err = %v; want nil", err)
+	if !errors.Is(err, ErrMalformedOutput) {
+		t.Errorf("err = %v; want ErrMalformedOutput", err)
 	}
 	if len(got) != 0 {
 		t.Errorf("got %d findings; want 0", len(got))
